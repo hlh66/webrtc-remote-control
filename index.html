@@ -1,0 +1,442 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC 远程控制</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .section h2 {
+            color: #555;
+            margin-top: 0;
+        }
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 11px;
+            resize: vertical;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            padding: 10px;
+            background-color: #e7f3fe;
+            border-left: 4px solid #2196F3;
+            margin: 20px 0;
+        }
+        #video-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+        video {
+            width: 100%;
+            max-width: 100%;
+            background-color: #000;
+            border: 2px solid #333;
+            border-radius: 5px;
+        }
+        .info {
+            color: #666;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        .step {
+            background-color: #f9f9f9;
+            padding: 10px;
+            margin: 5px 0;
+            border-left: 3px solid #4CAF50;
+        }
+        .video-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        .video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebRTC 远程控制系统</h1>
+        
+        <div id="status">状态: 未连接</div>
+        
+        <div class="section">
+            <h2>🔗 连接设置</h2>
+            <div class="step">
+                <strong>步骤 1:</strong> 选择你的角色
+            </div>
+            <button id="btn-host" onclick="setupHost()">🖥️ 我是被控制端（主机）</button>
+            <button id="btn-client" onclick="setupClient()">💻 我是控制端（客户端）</button>
+        </div>
+        
+        <div class="section" id="host-section" style="display: none;">
+            <h2>📤 步骤 2: 生成 SDP（主机）</h2>
+            <div class="info">点击生成按钮后，复制下面的 SDP 文本发送给控制端</div>
+            <button onclick="createOffer()">生成 SDP</button>
+            <button onclick="copyToClipboard('host-sdp')">📋 复制 SDP</button>
+            <textarea id="host-sdp" readonly placeholder="SDP 将在这里生成...点击生成按钮后复制"></textarea>
+        </div>
+        
+        <div class="section" id="client-section" style="display: none;">
+            <h2>📥 步骤 2: 粘贴主机的 SDP（控制端）</h2>
+            <div class="info">将被控制端发来的 SDP 粘贴到这里</div>
+            <textarea id="client-offer-sdp" placeholder="粘贴主机发来的 SDP 文本..."></textarea>
+            <button onclick="sendOfferToServer()">🔄 连接到主机</button>
+        </div>
+        
+        <div class="section" id="client-answer-section" style="display: none;">
+            <h2>📤 步骤 3: 复制应答 SDP（控制端）</h2>
+            <div class="info">复制下面的 SDP 文本发送回主机</div>
+            <button onclick="copyToClipboard('client-answer-sdp')">📋 复制 SDP</button>
+            <textarea id="client-answer-sdp" readonly placeholder="应答 SDP 将在这里生成..."></textarea>
+        </div>
+        
+        <div class="section" id="host-answer-section" style="display: none;">
+            <h2>📥 步骤 3: 粘贴控制端的 SDP（主机）</h2>
+            <div class="info">将控制端发来的应答 SDP 粘贴到这里</div>
+            <textarea id="host-answer-sdp" placeholder="粘贴控制端发来的应答 SDP 文本..."></textarea>
+            <button onclick="finalizeConnection()">✅ 建立连接</button>
+        </div>
+        
+        <div class="section" id="connection-status" style="display: none;">
+            <h2>✨ 连接状态</h2>
+            <div id="connection-info" style="font-size: 18px; font-weight: bold;">等待连接...</div>
+        </div>
+        
+        <div class="section" id="video-container" style="display: none;">
+            <h2>🖼️ 远程屏幕</h2>
+            <div class="video-wrapper">
+                <video id="remote-video" autoplay playsinline muted></video>
+                <div id="video-overlay" class="video-overlay"></div>
+            </div>
+            <div class="info" id="video-controls" style="display: none;">
+                <p><strong>控制说明:</strong></p>
+                <ul>
+                    <li>🖱️ 单击屏幕 = 左键点击</li>
+                    <li>🖱️ 双击屏幕 = 左键双击</li>
+                    <li>🖱️ 右键点击 = 右键菜单</li>
+                    <li>⌨️ 直接输入 = 键盘输入</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let peerConnection = null;
+        let isHost = false;
+        let videoOverlay = null;
+        
+        const STUN_SERVERS = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun.syncthing.net:3478' },
+                { urls: 'stun:stun.qq.com:3478' }
+            ]
+        };
+        
+        function updateStatus(message) {
+            document.getElementById('status').textContent = '状态: ' + message;
+        }
+        
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(section => {
+                if (!section.id.includes('video-container') && !section.id.includes('connection-status')) {
+                    section.style.display = 'none';
+                }
+            });
+            document.getElementById(sectionId).style.display = 'block';
+            document.getElementById('video-container').style.display = 'block';
+        }
+        
+        function setupHost() {
+            isHost = true;
+            updateStatus('正在初始化被控制端...');
+            document.getElementById('btn-host').disabled = true;
+            document.getElementById('btn-client').disabled = true;
+            showSection('host-section');
+            document.getElementById('host-answer-section').style.display = 'block';
+            updateStatus('等待生成 SDP...');
+        }
+        
+        function setupClient() {
+            isHost = false;
+            updateStatus('正在初始化控制端...');
+            document.getElementById('btn-host').disabled = true;
+            document.getElementById('btn-client').disabled = true;
+            showSection('client-section');
+            document.getElementById('client-answer-section').style.display = 'block';
+            updateStatus('等待粘贴主机的 SDP...');
+        }
+        
+        function createOffer() {
+            const offerText = document.getElementById('host-sdp').value;
+            if (!offerText) {
+                updateStatus('正在创建 Offer...');
+                
+                // 使用服务器 API 创建 Offer
+                fetch('/offer', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ sdp: '', type: 'offer' })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('host-sdp').value = JSON.stringify(data);
+                    updateStatus('SDP 已生成，请复制给控制端');
+                })
+                .catch(error => {
+                    console.error('创建 Offer 失败:', error);
+                    updateStatus('错误: ' + error.message);
+                });
+            }
+        }
+        
+        function sendOfferToServer() {
+            const offerSdpText = document.getElementById('client-offer-sdp').value;
+            if (!offerSdpText) {
+                updateStatus('请先粘贴主机的 SDP');
+                return;
+            }
+            
+            updateStatus('正在连接到主机...');
+            
+            try {
+                const offerSdp = JSON.parse(offerSdpText);
+                
+                peerConnection = new RTCPeerConnection(STUN_SERVERS);
+                
+                peerConnection.ontrack = (event) => {
+                    document.getElementById('remote-video').srcObject = event.streams[0];
+                    updateStatus('正在接收视频流...');
+                };
+                
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate === null) {
+                        updateStatus('应答 SDP 已生成，请复制给主机');
+                    }
+                };
+                
+                peerConnection.onconnectionstatechange = () => {
+                    const state = peerConnection.connectionState;
+                    updateStatus('连接状态: ' + state);
+                    if (state === 'connected') {
+                        document.getElementById('connection-status').style.display = 'block';
+                        document.getElementById('connection-info').textContent = '✓ 连接已建立';
+                        document.getElementById('connection-info').style.color = '#4CAF50';
+                        document.getElementById('video-controls').style.display = 'block';
+                        setupVideoControls();
+                    }
+                };
+                
+                peerConnection.setRemoteDescription(new RTCSessionDescription(offerSdp));
+                
+                peerConnection.createAnswer()
+                    .then(answer => peerConnection.setLocalDescription(answer))
+                    .then(() => {
+                        document.getElementById('client-answer-sdp').value = JSON.stringify(peerConnection.localDescription);
+                    })
+                    .catch(error => {
+                        console.error('创建 Answer 失败:', error);
+                        updateStatus('错误: ' + error.message);
+                    });
+                    
+            } catch (error) {
+                updateStatus('SDP 格式错误: ' + error.message);
+            }
+        }
+        
+        function finalizeConnection() {
+            const answerSdpText = document.getElementById('host-answer-sdp').value;
+            if (!answerSdpText) {
+                updateStatus('请先粘贴控制端的应答 SDP');
+                return;
+            }
+            
+            updateStatus('正在建立连接...');
+            
+            try {
+                const answerSdp = JSON.parse(answerSdpText);
+                
+                peerConnection = new RTCPeerConnection(STUN_SERVERS);
+                
+                peerConnection.onconnectionstatechange = () => {
+                    const state = peerConnection.connectionState;
+                    updateStatus('连接状态: ' + state);
+                    if (state === 'connected') {
+                        document.getElementById('connection-status').style.display = 'block';
+                        document.getElementById('connection-info').textContent = '✓ 连接已建立';
+                        document.getElementById('connection-info').style.color = '#4CAF50';
+                    }
+                };
+                
+                peerConnection.setRemoteDescription(new RTCSessionDescription(answerSdp))
+                    .then(() => {
+                        updateStatus('连接建立成功！');
+                    })
+                    .catch(error => {
+                        console.error('建立连接失败:', error);
+                        updateStatus('错误: ' + error.message);
+                    });
+                    
+            } catch (error) {
+                updateStatus('SDP 格式错误: ' + error.message);
+            }
+        }
+        
+        function setupVideoControls() {
+            const video = document.getElementById('remote-video');
+            const videoWrapper = document.querySelector('.video-wrapper');
+            
+            // 鼠标点击事件
+            video.addEventListener('click', (e) => {
+                const rect = video.getBoundingClientRect();
+                const scaleX = video.videoWidth / rect.width;
+                const scaleY = video.videoHeight / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                
+                sendMouseClick(x, y, rect.width, rect.height);
+            });
+            
+            // 鼠标双击事件
+            video.addEventListener('dblclick', (e) => {
+                const rect = video.getBoundingClientRect();
+                const scaleX = video.videoWidth / rect.width;
+                const scaleY = video.videoHeight / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                
+                sendMouseDblClick(x, y, rect.width, rect.height);
+            });
+            
+            // 鼠标右键事件
+            video.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const rect = video.getBoundingClientRect();
+                const scaleX = video.videoWidth / rect.width;
+                const scaleY = video.videoHeight / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                
+                sendMouseRightClick(x, y, rect.width, rect.height);
+            });
+            
+            // 键盘事件
+            document.addEventListener('keydown', (e) => {
+                if (document.activeElement === document.body) {
+                    e.preventDefault();
+                    sendKeyPress(e.key);
+                }
+            });
+        }
+        
+        function sendMouseClick(x, y, width, height) {
+            const formData = new FormData();
+            formData.append('x', x);
+            formData.append('y', y);
+            formData.append('X', width);
+            formData.append('Y', height);
+            formData.append('type', 'click');
+            
+            fetch('/mouse', {
+                method: 'POST',
+                body: formData
+            });
+        }
+        
+        function sendMouseDblClick(x, y, width, height) {
+            const formData = new FormData();
+            formData.append('x', x);
+            formData.append('y', y);
+            formData.append('X', width);
+            formData.append('Y', height);
+            formData.append('type', 'dblclick');
+            
+            fetch('/mouse', {
+                method: 'POST',
+                body: formData
+            });
+        }
+        
+        function sendMouseRightClick(x, y, width, height) {
+            const formData = new FormData();
+            formData.append('x', x);
+            formData.append('y', y);
+            formData.append('X', width);
+            formData.append('Y', height);
+            formData.append('type', 'rightclick');
+            
+            fetch('/mouse', {
+                method: 'POST',
+                body: formData
+            });
+        }
+        
+        function sendKeyPress(key) {
+            const formData = new FormData();
+            formData.append('type', key);
+            
+            fetch('/keyboard', {
+                method: 'POST',
+                body: formData
+            });
+        }
+        
+        function copyToClipboard(elementId) {
+            const copyText = document.getElementById(elementId);
+            copyText.select();
+            document.execCommand('copy');
+            updateStatus('已复制到剪贴板');
+        }
+    </script>
+</body>
+</html>
